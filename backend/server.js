@@ -36,6 +36,24 @@ app.get('/api/records', async (req, res) => {
   }
 });
 
+app.get('/api/records/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid record id' });
+  }
+
+  try {
+    const result = await pool.query('SELECT * FROM records WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/records', async (req, res) => {
   const { title, category, status = 'Pending' } = req.body;
   if (!title || !category) {

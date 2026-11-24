@@ -1,2 +1,2 @@
-// Activity 8: replace this value with your deployed backend base URL.
-export const API_BASE_URL = "";
+// Activity 8: deployed backend base URL (HTTPS, no trailing slash).
+export const API_BASE_URL = "https://proposal-up31.onrender.com";

@@ -1,208 +1,334 @@
-const API_BASE =
-  window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:3000'
-    : 'https://YOUR-DEPLOYED-BACKEND-URL';
+import { recordService } from "./data.js";
 
-const RECORDS_URL = `${API_BASE}/api/records`;
+const form = document.querySelector("#proposal-form");
+const formTitleHeading = document.querySelector("#form-title");
+const titleInput = document.querySelector("#title");
+const categoryInput = document.querySelector("#category");
+const descriptionInput = document.querySelector("#description");
+const statusInput = document.querySelector("#status");
+const saveButton = document.querySelector("#save-button");
+const cancelEditButton = document.querySelector("#cancel-edit");
+const formMessage = document.querySelector("#form-message");
 
-const form = document.getElementById('proposal-form');
-const formTitle = document.getElementById('form-title');
-const titleInput = document.getElementById('title');
-const categoryInput = document.getElementById('category');
-const descriptionInput = document.getElementById('description');
-const statusInput = document.getElementById('status');
-const saveButton = document.getElementById('save-button');
-const cancelEditButton = document.getElementById('cancel-edit');
-const formMessage = document.getElementById('form-message');
+const recordCount = document.querySelector("#record-count");
+const searchInput = document.querySelector("#search");
+const filterStatusSelect = document.querySelector("#filter-status");
+const listMessage = document.querySelector("#list-message");
+const recordList = document.querySelector("#record-list");
 
-const searchInput = document.getElementById('search');
-const filterStatus = document.getElementById('filter-status');
-const recordCount = document.getElementById('record-count');
-const listMessage = document.getElementById('list-message');
-const recordList = document.getElementById('record-list');
-
-const detailsDialog = document.getElementById('details-dialog');
-const detailsContent = document.getElementById('details-content');
-const closeDialogBtn = document.getElementById('close-dialog');
-const doneDialogBtn = document.getElementById('done-dialog');
+const detailsDialog = document.querySelector("#details-dialog");
+const detailsContent = document.querySelector("#details-content");
+const closeDialogButton = document.querySelector("#close-dialog");
+const doneDialogButton = document.querySelector("#done-dialog");
 
 let records = [];
 let editingId = null;
 
-function showMessage(el, text, isError = false) {
-  el.textContent = text;
-  el.hidden = false;
-  el.style.color = isError ? '#b91c1c' : '#15803d';
+function setMessage(element, text, isError = false) {
+  if (!element) return;
+  if (!text) {
+    element.textContent = "";
+    element.hidden = true;
+    element.dataset.type = "";
+    return;
+  }
+  element.textContent = text;
+  element.hidden = false;
+  element.dataset.type = isError ? "error" : "info";
 }
 
-function hideMessage(el) {
-  el.textContent = '';
-  el.hidden = true;
-}
-
-function escapeHtml(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function setSaveButtonState(isSaving) {
+  if (!saveButton) return;
+  saveButton.disabled = isSaving;
+  if (isSaving) {
+    saveButton.textContent = editingId !== null ? "Saving..." : "Submitting...";
+  } else {
+    saveButton.textContent = editingId !== null ? "Save changes" : "Submit proposal";
+  }
 }
 
 function resetFormState() {
   editingId = null;
   form.reset();
-  formTitle.textContent = 'New proposal';
-  saveButton.textContent = 'Submit proposal';
-  cancelEditButton.hidden = true;
-}
-
-function renderRecords() {
-  const query = searchInput.value.trim().toLowerCase();
-  const statusFilter = filterStatus.value;
-
-  const filtered = records.filter((rec) => {
-    const matchesTitle = rec.title.toLowerCase().includes(query);
-    const matchesStatus = !statusFilter || rec.status === statusFilter;
-    return matchesTitle && matchesStatus;
-  });
-
-  recordCount.textContent = `${filtered.length} result${filtered.length === 1 ? '' : 's'}`;
-
-  if (filtered.length === 0) {
-    recordList.innerHTML = '<p class="empty-state">No proposals match your filters.</p>';
-    return;
+  if (statusInput) {
+    statusInput.value = "Pending";
   }
-
-  recordList.innerHTML = filtered
-    .map(
-      (rec) => `
-      <article class="record-card" data-id="${rec.id}">
-        <div class="record-top">
-          <span class="badge">${escapeHtml(rec.category)}</span>
-          <span class="status">${escapeHtml(rec.status)}</span>
-        </div>
-        <h4>${escapeHtml(rec.title)}</h4>
-        <div class="record-actions">
-          <button type="button" class="button secondary" data-action="view" data-id="${rec.id}">View</button>
-          <button type="button" class="button secondary" data-action="edit" data-id="${rec.id}">Edit</button>
-          <button type="button" class="button secondary" data-action="delete" data-id="${rec.id}">Delete</button>
-        </div>
-      </article>
-    `
-    )
-    .join('');
-}
-
-async function loadRecords() {
-  hideMessage(listMessage);
-  try {
-    const res = await fetch(RECORDS_URL);
-    if (!res.ok) throw new Error(`Failed to load records (${res.status})`);
-    records = await res.json();
-    renderRecords();
-  } catch (err) {
-    showMessage(listMessage, `Could not reach backend API: ${err.message}`, true);
+  if (formTitleHeading) {
+    formTitleHeading.textContent = "New proposal";
   }
+  if (cancelEditButton) {
+    cancelEditButton.hidden = true;
+  }
+  setSaveButtonState(false);
 }
 
-form.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  hideMessage(formMessage);
-
+function validateInputs() {
   const title = titleInput.value.trim();
   const category = categoryInput.value.trim();
-  const status = statusInput.value.trim() || 'Pending';
+  const description = descriptionInput.value.trim();
+  const status = statusInput.value.trim();
 
-  if (title.length < 3) {
-    showMessage(formMessage, 'Title must be at least 3 characters.', true);
-    return;
+  if (title.length < 3 || title.length > 80) {
+    setMessage(formMessage, "Title must be between 3 and 80 characters.", true);
+    return null;
   }
+
   if (!category) {
-    showMessage(formMessage, 'Please select a category.', true);
+    setMessage(formMessage, "Please select a category.", true);
+    return null;
+  }
+
+  if (description.length < 5 || description.length > 300) {
+    setMessage(formMessage, "Description must be between 5 and 300 characters.", true);
+    return null;
+  }
+
+  if (!["Pending", "In progress", "Completed"].includes(status)) {
+    setMessage(formMessage, "Status must be Pending, In progress, or Completed.", true);
+    return null;
+  }
+
+  return { title, category, description, status };
+}
+
+function getFilteredRecords() {
+  const query = (searchInput?.value || "").trim().toLowerCase();
+  const selectedStatus = filterStatusSelect?.value || "";
+
+  return records.filter((item) => {
+    const matchesTitle =
+      !query || String(item.title || "").toLowerCase().includes(query);
+    const matchesStatus = !selectedStatus || item.status === selectedStatus;
+    return matchesTitle && matchesStatus;
+  });
+}
+
+function getStatusClass(status) {
+  if (status === "In progress") return "status-in-progress";
+  if (status === "Completed") return "status-completed";
+  return "status-pending";
+}
+
+function renderList() {
+  const filtered = getFilteredRecords();
+  recordList.textContent = "";
+
+  if (recordCount) {
+    const suffix = filtered.length === 1 ? "result" : "results";
+    recordCount.textContent = `${filtered.length} ${suffix}`;
+  }
+
+  if (filtered.length === 0) {
+    const emptyText = document.createElement("p");
+    emptyText.className = "loading-state";
+    emptyText.style.animation = "none";
+    emptyText.textContent = "No proposals match your current filter.";
+    recordList.appendChild(emptyText);
     return;
   }
+
+  filtered.forEach((record) => {
+    const card = document.createElement("article");
+    card.className = "record-card";
+
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = record.title ?? "";
+
+    const metaEl = document.createElement("div");
+    metaEl.className = "record-meta";
+
+    const categorySpan = document.createElement("span");
+    categorySpan.textContent = record.category ?? "";
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `status-badge ${getStatusClass(record.status)}`;
+    statusBadge.textContent = record.status ?? "Pending";
+
+    metaEl.append(categorySpan, statusBadge);
+
+    const descEl = document.createElement("p");
+    descEl.textContent = record.description ?? "";
+
+    const actions = document.createElement("div");
+    actions.className = "record-actions";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "button secondary";
+    viewBtn.textContent = "View";
+    viewBtn.addEventListener("click", () => handleView(record.id));
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "button secondary";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", () => startEdit(record));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "button secondary";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => handleDelete(record));
+
+    actions.append(viewBtn, editBtn, deleteBtn);
+    card.append(titleEl, metaEl, descEl, actions);
+    recordList.appendChild(card);
+  });
+}
+
+async function fetchAndRenderRecords() {
+  recordList.textContent = "";
+  const loadingEl = document.createElement("p");
+  loadingEl.className = "loading-state";
+  loadingEl.textContent = "Loading records";
+  recordList.appendChild(loadingEl);
+  setMessage(listMessage, "");
 
   try {
-    const url = editingId ? `${RECORDS_URL}/${editingId}` : RECORDS_URL;
-    const method = editingId ? 'PUT' : 'POST';
-
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, category, status }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
-
-    showMessage(
-      formMessage,
-      editingId ? 'Proposal updated in database.' : 'Proposal submitted to database.'
-    );
-    resetFormState();
-    await loadRecords();
-  } catch (err) {
-    showMessage(formMessage, err.message, true);
-  }
-});
-
-cancelEditButton.addEventListener('click', () => {
-  resetFormState();
-  hideMessage(formMessage);
-});
-
-recordList.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-action]');
-  if (!btn) return;
-
-  const id = Number(btn.dataset.id);
-  const action = btn.dataset.action;
-  const record = records.find((r) => r.id === id);
-  if (!record) return;
-
-  if (action === 'view') {
-    const created = record.created_at
-      ? new Date(record.created_at).toLocaleString()
-      : 'N/A';
-    detailsContent.innerHTML = `
-      <p><strong>Title:</strong> ${escapeHtml(record.title)}</p>
-      <p><strong>Category:</strong> ${escapeHtml(record.category)}</p>
-      <p><strong>Status:</strong> ${escapeHtml(record.status)}</p>
-      <p><strong>Created:</strong> ${escapeHtml(created)}</p>
-    `;
-    detailsDialog.showModal();
-  }
-
-  if (action === 'edit') {
-    editingId = record.id;
-    titleInput.value = record.title;
-    categoryInput.value = record.category;
-    if (descriptionInput) descriptionInput.value = record.description || 'Campus event proposal';
-    statusInput.value = record.status;
-    formTitle.textContent = `Edit proposal #${record.id}`;
-    saveButton.textContent = 'Save changes';
-    cancelEditButton.hidden = false;
-    titleInput.focus();
-  }
-
-  if (action === 'delete') {
-    try {
-      const res = await fetch(`${RECORDS_URL}/${id}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `Delete failed (${res.status})`);
-      if (editingId === id) resetFormState();
-      showMessage(listMessage, `Deleted "${record.title}".`);
-      await loadRecords();
-    } catch (err) {
-      showMessage(listMessage, err.message, true);
+    const data = await recordService.list();
+    records = Array.isArray(data) ? data : [];
+    renderList();
+  } catch (error) {
+    recordList.textContent = "";
+    if (recordCount) {
+      recordCount.textContent = "0 results";
     }
+    setMessage(
+      listMessage,
+      error.message || "Unable to load records from the server.",
+      true
+    );
+  }
+}
+
+async function handleView(id) {
+  setMessage(listMessage, "");
+  try {
+    const record = await recordService.get(id);
+    if (!detailsContent) return;
+
+    detailsContent.textContent = "";
+
+    const heading = document.createElement("h3");
+    heading.textContent = record.title ?? "";
+
+    const categoryLine = document.createElement("p");
+    categoryLine.textContent = `Category: ${record.category ?? ""}`;
+
+    const statusLine = document.createElement("p");
+    statusLine.textContent = `Status: ${record.status ?? ""}`;
+
+    const descLine = document.createElement("p");
+    descLine.textContent = record.description ?? "";
+
+    detailsContent.append(heading, categoryLine, statusLine, descLine);
+
+    if (detailsDialog && typeof detailsDialog.showModal === "function") {
+      detailsDialog.showModal();
+    }
+  } catch (error) {
+    setMessage(
+      listMessage,
+      error.message || "Could not load record details.",
+      true
+    );
+  }
+}
+
+function startEdit(record) {
+  editingId = record.id;
+  titleInput.value = record.title ?? "";
+  categoryInput.value = record.category ?? "";
+  descriptionInput.value = record.description ?? "";
+  statusInput.value = record.status ?? "Pending";
+
+  if (formTitleHeading) {
+    formTitleHeading.textContent = `Edit proposal #${record.id}`;
+  }
+  if (cancelEditButton) {
+    cancelEditButton.hidden = false;
+  }
+  setSaveButtonState(false);
+  setMessage(formMessage, `Editing "${record.title ?? ""}".`);
+  titleInput.focus();
+}
+
+async function handleDelete(record) {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${record.title ?? "this proposal"}"?`
+  );
+  if (!confirmed) return;
+
+  setMessage(listMessage, "");
+  try {
+    await recordService.remove(record.id);
+    if (editingId === record.id) {
+      resetFormState();
+      setMessage(formMessage, "");
+    }
+    await fetchAndRenderRecords();
+    setMessage(listMessage, "Proposal deleted.");
+  } catch (error) {
+    setMessage(
+      listMessage,
+      error.message || "Could not delete proposal.",
+      true
+    );
+  }
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setMessage(formMessage, "");
+
+  const payload = validateInputs();
+  if (!payload) return;
+
+  setSaveButtonState(true);
+  try {
+    if (editingId !== null) {
+      await recordService.update(editingId, payload);
+      resetFormState();
+      await fetchAndRenderRecords();
+      setMessage(formMessage, "Proposal updated successfully.");
+    } else {
+      await recordService.create(payload);
+      resetFormState();
+      await fetchAndRenderRecords();
+      setMessage(formMessage, "Proposal submitted successfully.");
+    }
+  } catch (error) {
+    setMessage(
+      formMessage,
+      error.message || "Failed to save proposal. Please try again.",
+      true
+    );
+  } finally {
+    setSaveButtonState(false);
   }
 });
 
-searchInput.addEventListener('input', renderRecords);
-filterStatus.addEventListener('change', renderRecords);
+if (cancelEditButton) {
+  cancelEditButton.addEventListener("click", () => {
+    resetFormState();
+    setMessage(formMessage, "Edit cancelled.");
+  });
+}
 
-closeDialogBtn.addEventListener('click', () => detailsDialog.close());
-doneDialogBtn.addEventListener('click', () => detailsDialog.close());
+if (searchInput) {
+  searchInput.addEventListener("input", renderList);
+}
 
-loadRecords();
+if (filterStatusSelect) {
+  filterStatusSelect.addEventListener("change", renderList);
+}
+
+if (closeDialogButton && detailsDialog) {
+  closeDialogButton.addEventListener("click", () => detailsDialog.close());
+}
+
+if (doneDialogButton && detailsDialog) {
+  doneDialogButton.addEventListener("click", () => detailsDialog.close());
+}
+
+fetchAndRenderRecords();

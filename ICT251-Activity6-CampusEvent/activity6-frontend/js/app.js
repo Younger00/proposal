@@ -1,115 +1,334 @@
 import { recordService } from "./data.js";
 
-const $ = id => document.getElementById(id);
-const form = $("proposal-form");
-const list = $("record-list");
+const form = document.querySelector("#proposal-form");
+const formTitleHeading = document.querySelector("#form-title");
+const titleInput = document.querySelector("#title");
+const categoryInput = document.querySelector("#category");
+const descriptionInput = document.querySelector("#description");
+const statusInput = document.querySelector("#status");
+const saveButton = document.querySelector("#save-button");
+const cancelEditButton = document.querySelector("#cancel-edit");
+const formMessage = document.querySelector("#form-message");
+
+const recordCount = document.querySelector("#record-count");
+const searchInput = document.querySelector("#search");
+const filterStatusSelect = document.querySelector("#filter-status");
+const listMessage = document.querySelector("#list-message");
+const recordList = document.querySelector("#record-list");
+
+const detailsDialog = document.querySelector("#details-dialog");
+const detailsContent = document.querySelector("#details-content");
+const closeDialogButton = document.querySelector("#close-dialog");
+const doneDialogButton = document.querySelector("#done-dialog");
+
+let records = [];
 let editingId = null;
 
-function message(element, text, type = "success") {
+function setMessage(element, text, isError = false) {
+  if (!element) return;
+  if (!text) {
+    element.textContent = "";
+    element.hidden = true;
+    element.dataset.type = "";
+    return;
+  }
   element.textContent = text;
-  element.className = `message ${type}`;
-  element.hidden = !text;
+  element.hidden = false;
+  element.dataset.type = isError ? "error" : "info";
 }
-function clearMessage(element) { message(element, ""); }
-function resetForm() {
+
+function setSaveButtonState(isSaving) {
+  if (!saveButton) return;
+  saveButton.disabled = isSaving;
+  if (isSaving) {
+    saveButton.textContent = editingId !== null ? "Saving..." : "Submitting...";
+  } else {
+    saveButton.textContent = editingId !== null ? "Save changes" : "Submit proposal";
+  }
+}
+
+function resetFormState() {
   editingId = null;
   form.reset();
-  $("form-title").textContent = "New proposal";
-  $("save-button").textContent = "Submit proposal";
-  $("cancel-edit").hidden = true;
+  if (statusInput) {
+    statusInput.value = "Pending";
+  }
+  if (formTitleHeading) {
+    formTitleHeading.textContent = "New proposal";
+  }
+  if (cancelEditButton) {
+    cancelEditButton.hidden = true;
+  }
+  setSaveButtonState(false);
 }
-function makeButton(label, className, callback) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = label;
-  button.className = className;
-  button.addEventListener("click", callback);
-  return button;
+
+function validateInputs() {
+  const title = titleInput.value.trim();
+  const category = categoryInput.value.trim();
+  const description = descriptionInput.value.trim();
+  const status = statusInput.value.trim();
+
+  if (title.length < 3 || title.length > 80) {
+    setMessage(formMessage, "Title must be between 3 and 80 characters.", true);
+    return null;
+  }
+
+  if (!category) {
+    setMessage(formMessage, "Please select a category.", true);
+    return null;
+  }
+
+  if (description.length < 5 || description.length > 300) {
+    setMessage(formMessage, "Description must be between 5 and 300 characters.", true);
+    return null;
+  }
+
+  if (!["Pending", "In progress", "Completed"].includes(status)) {
+    setMessage(formMessage, "Status must be Pending, In progress, or Completed.", true);
+    return null;
+  }
+
+  return { title, category, description, status };
 }
-function makeText(tag, className, text) {
-  const node = document.createElement(tag);
-  node.className = className;
-  node.textContent = text;
-  return node;
+
+function getFilteredRecords() {
+  const query = (searchInput?.value || "").trim().toLowerCase();
+  const selectedStatus = filterStatusSelect?.value || "";
+
+  return records.filter((item) => {
+    const matchesTitle =
+      !query || String(item.title || "").toLowerCase().includes(query);
+    const matchesStatus = !selectedStatus || item.status === selectedStatus;
+    return matchesTitle && matchesStatus;
+  });
 }
-async function render() {
+
+function getStatusClass(status) {
+  if (status === "In progress") return "status-in-progress";
+  if (status === "Completed") return "status-completed";
+  return "status-pending";
+}
+
+function renderList() {
+  const filtered = getFilteredRecords();
+  recordList.textContent = "";
+
+  if (recordCount) {
+    const suffix = filtered.length === 1 ? "result" : "results";
+    recordCount.textContent = `${filtered.length} ${suffix}`;
+  }
+
+  if (filtered.length === 0) {
+    const emptyText = document.createElement("p");
+    emptyText.className = "loading-state";
+    emptyText.style.animation = "none";
+    emptyText.textContent = "No proposals match your current filter.";
+    recordList.appendChild(emptyText);
+    return;
+  }
+
+  filtered.forEach((record) => {
+    const card = document.createElement("article");
+    card.className = "record-card";
+
+    const titleEl = document.createElement("h4");
+    titleEl.textContent = record.title ?? "";
+
+    const metaEl = document.createElement("div");
+    metaEl.className = "record-meta";
+
+    const categorySpan = document.createElement("span");
+    categorySpan.textContent = record.category ?? "";
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `status-badge ${getStatusClass(record.status)}`;
+    statusBadge.textContent = record.status ?? "Pending";
+
+    metaEl.append(categorySpan, statusBadge);
+
+    const descEl = document.createElement("p");
+    descEl.textContent = record.description ?? "";
+
+    const actions = document.createElement("div");
+    actions.className = "record-actions";
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "button secondary";
+    viewBtn.textContent = "View";
+    viewBtn.addEventListener("click", () => handleView(record.id));
+
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "button secondary";
+    editBtn.textContent = "Edit";
+    editBtn.addEventListener("click", () => startEdit(record));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "button secondary";
+    deleteBtn.textContent = "Delete";
+    deleteBtn.addEventListener("click", () => handleDelete(record));
+
+    actions.append(viewBtn, editBtn, deleteBtn);
+    card.append(titleEl, metaEl, descEl, actions);
+    recordList.appendChild(card);
+  });
+}
+
+async function fetchAndRenderRecords() {
+  recordList.textContent = "";
+  const loadingEl = document.createElement("p");
+  loadingEl.className = "loading-state";
+  loadingEl.textContent = "Loading records";
+  recordList.appendChild(loadingEl);
+  setMessage(listMessage, "");
+
   try {
-    const records = await recordService.list();
-    const query = $("search").value.trim().toLowerCase();
-    const status = $("filter-status").value;
-    const shown = records.filter(record => record.title.toLowerCase().includes(query) && (!status || record.status === status));
-    $("record-count").textContent = `${shown.length} ${shown.length === 1 ? "result" : "results"}`;
-    list.replaceChildren();
-    if (!shown.length) {
-      list.append(makeText("p", "empty-state", records.length ? "No proposals match your search or filter." : "No proposals yet. Use the form to add your first one."));
-      return;
+    const data = await recordService.list();
+    records = Array.isArray(data) ? data : [];
+    renderList();
+  } catch (error) {
+    recordList.textContent = "";
+    if (recordCount) {
+      recordCount.textContent = "0 results";
     }
-    for (const record of shown) {
-      const article = document.createElement("article");
-      article.className = "record-card";
-      const top = document.createElement("div"); top.className = "record-top";
-      top.append(makeText("span", "record-category", record.category), makeText("span", `status status-${record.status.toLowerCase().replaceAll(" ", "-")}`, record.status));
-      article.append(top, makeText("h4", "record-title", record.title), makeText("p", "record-description", record.description));
-      const bottom = document.createElement("div"); bottom.className = "record-bottom";
-      bottom.append(makeText("span", "record-id", `#${String(record.id).padStart(3, "0")}`));
-      const actions = document.createElement("div"); actions.className = "record-actions";
-      actions.append(makeButton("View", "action-button", () => viewRecord(record.id)), makeButton("Edit", "action-button", () => editRecord(record.id)), makeButton("Delete", "action-button danger", () => deleteRecord(record.id)));
-      bottom.append(actions); article.append(bottom); list.append(article);
-    }
-  } catch (error) { message($("list-message"), error.message, "error"); }
+    setMessage(
+      listMessage,
+      error.message || "Unable to load records from the server.",
+      true
+    );
+  }
 }
-async function viewRecord(id) {
+
+async function handleView(id) {
+  setMessage(listMessage, "");
   try {
     const record = await recordService.get(id);
-    const content = $("details-content"); content.replaceChildren();
-    for (const [label, value] of [["ID", record.id], ["Title", record.title], ["Category", record.category], ["Description", record.description], ["Status", record.status]]) {
-      const row = document.createElement("div"); row.className = "detail-row";
-      row.append(makeText("strong", "", label), makeText("p", "", String(value)));
-      content.append(row);
+    if (!detailsContent) return;
+
+    detailsContent.textContent = "";
+
+    const heading = document.createElement("h3");
+    heading.textContent = record.title ?? "";
+
+    const categoryLine = document.createElement("p");
+    categoryLine.textContent = `Category: ${record.category ?? ""}`;
+
+    const statusLine = document.createElement("p");
+    statusLine.textContent = `Status: ${record.status ?? ""}`;
+
+    const descLine = document.createElement("p");
+    descLine.textContent = record.description ?? "";
+
+    detailsContent.append(heading, categoryLine, statusLine, descLine);
+
+    if (detailsDialog && typeof detailsDialog.showModal === "function") {
+      detailsDialog.showModal();
     }
-    $("details-dialog").showModal();
-  } catch (error) { message($("list-message"), error.message, "error"); }
+  } catch (error) {
+    setMessage(
+      listMessage,
+      error.message || "Could not load record details.",
+      true
+    );
+  }
 }
-async function editRecord(id) {
+
+function startEdit(record) {
+  editingId = record.id;
+  titleInput.value = record.title ?? "";
+  categoryInput.value = record.category ?? "";
+  descriptionInput.value = record.description ?? "";
+  statusInput.value = record.status ?? "Pending";
+
+  if (formTitleHeading) {
+    formTitleHeading.textContent = `Edit proposal #${record.id}`;
+  }
+  if (cancelEditButton) {
+    cancelEditButton.hidden = false;
+  }
+  setSaveButtonState(false);
+  setMessage(formMessage, `Editing "${record.title ?? ""}".`);
+  titleInput.focus();
+}
+
+async function handleDelete(record) {
+  const confirmed = window.confirm(
+    `Are you sure you want to delete "${record.title ?? "this proposal"}"?`
+  );
+  if (!confirmed) return;
+
+  setMessage(listMessage, "");
   try {
-    const record = await recordService.get(id);
-    editingId = record.id;
-    for (const field of ["title", "category", "description", "status"]) $(field).value = record[field];
-    $("form-title").textContent = `Edit proposal #${id}`;
-    $("save-button").textContent = "Save changes";
-    $("cancel-edit").hidden = false;
-    clearMessage($("form-message"));
-    $("manage").scrollIntoView({ behavior: "smooth" });
-    $("title").focus({ preventScroll: true });
-  } catch (error) { message($("list-message"), error.message, "error"); }
+    await recordService.remove(record.id);
+    if (editingId === record.id) {
+      resetFormState();
+      setMessage(formMessage, "");
+    }
+    await fetchAndRenderRecords();
+    setMessage(listMessage, "Proposal deleted.");
+  } catch (error) {
+    setMessage(
+      listMessage,
+      error.message || "Could not delete proposal.",
+      true
+    );
+  }
 }
-async function deleteRecord(id) {
-  if (!window.confirm(`Delete proposal #${id}? This cannot be undone.`)) return;
-  try {
-    const result = await recordService.remove(id);
-    if (editingId === id) resetForm();
-    message($("list-message"), result.message);
-    await render();
-  } catch (error) { message($("list-message"), error.message, "error"); }
-}
-form.addEventListener("submit", async event => {
+
+form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  clearMessage($("form-message"));
-  const record = Object.fromEntries(["title", "category", "description", "status"].map(field => [field, $(field).value.trim()]));
+  setMessage(formMessage, "");
+
+  const payload = validateInputs();
+  if (!payload) return;
+
+  setSaveButtonState(true);
   try {
-    if (editingId === null) {
-      await recordService.create(record);
-      resetForm(); message($("form-message"), "Proposal submitted successfully.");
+    if (editingId !== null) {
+      await recordService.update(editingId, payload);
+      resetFormState();
+      await fetchAndRenderRecords();
+      setMessage(formMessage, "Proposal updated successfully.");
     } else {
-      await recordService.update(editingId, record);
-      resetForm(); message($("form-message"), "Proposal updated successfully.");
+      await recordService.create(payload);
+      resetFormState();
+      await fetchAndRenderRecords();
+      setMessage(formMessage, "Proposal submitted successfully.");
     }
-    await render();
-  } catch (error) { message($("form-message"), error.message, "error"); }
+  } catch (error) {
+    setMessage(
+      formMessage,
+      error.message || "Failed to save proposal. Please try again.",
+      true
+    );
+  } finally {
+    setSaveButtonState(false);
+  }
 });
-$("cancel-edit").addEventListener("click", () => { resetForm(); message($("form-message"), "Editing cancelled."); });
-$("search").addEventListener("input", render);
-$("filter-status").addEventListener("change", render);
-$("close-dialog").addEventListener("click", () => $("details-dialog").close());
-$("done-dialog").addEventListener("click", () => $("details-dialog").close());
-render();
+
+if (cancelEditButton) {
+  cancelEditButton.addEventListener("click", () => {
+    resetFormState();
+    setMessage(formMessage, "Edit cancelled.");
+  });
+}
+
+if (searchInput) {
+  searchInput.addEventListener("input", renderList);
+}
+
+if (filterStatusSelect) {
+  filterStatusSelect.addEventListener("change", renderList);
+}
+
+if (closeDialogButton && detailsDialog) {
+  closeDialogButton.addEventListener("click", () => detailsDialog.close());
+}
+
+if (doneDialogButton && detailsDialog) {
+  doneDialogButton.addEventListener("click", () => detailsDialog.close());
+}
+
+fetchAndRenderRecords();
